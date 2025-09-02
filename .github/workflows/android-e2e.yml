@@ -1,6 +1,10 @@
+# path: .github/workflows/android-e2e.yml
 name: Android E2E
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
 
 jobs:
   e2e:
@@ -9,24 +13,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - uses: android-actions/setup-android@v3
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Install Node deps
         run: npm ci
 
-      - name: Run E2E on emulator
+      - name: Run E2E on emulator (stable)
         uses: ReactiveCircus/android-emulator-runner@v2
-        env:
-          ANDROID_APP_PATH: ${{ github.workspace }}/app/build/outputs/apk/debug/app-debug.apk
         with:
           api-level: 33
           arch: x86_64
@@ -34,14 +39,27 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
-            set -e
             ./gradlew assembleDebug --stacktrace
-            adb wait-for-device
-            for i in $(seq 1 90); do [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] && break; sleep 1; done
-            adb shell input keyevent 82 || true
+            export ANDROID_APP_PATH=$PWD/app/build/outputs/apk/debug/app-debug.apk
 
-            # uia2 driver kurulu değilse kur; varsa güncelle, hata vermesin
+            # ensure driver present; DO NOT fail if already installed
+            npx appium driver list --installed || true
             npx appium driver install uiautomator2 || npx appium driver update uiautomator2 || true
 
-            # Appium'ı WDIO başlatır → direkt test
+            # start appium
+            nohup npx appium --log-level warn > appium.log 2>&1 &
+            # wait appium ready (POSIX-safe)
+            for i in $(seq 1 40); do curl -fsS http://127.0.0.1:4723/status >/dev/null && break; sleep 1; done
+            curl -fsS http://127.0.0.1:4723/status >/dev/null || (echo 'Appium did not start'; exit 1)
+
+            # run tests
             npx wdio run ./wdio.android.conf.js
+
+      - name: Upload artifacts (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            appium.log
