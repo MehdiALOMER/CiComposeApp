@@ -30,7 +30,7 @@ jobs:
       - name: Install Node deps
         run: npm ci
 
-      - name: Run E2E on emulator (stable, POSIX sh)
+      - name: Run E2E on emulator (stable)
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
           api-level: 33
@@ -41,13 +41,17 @@ jobs:
           script: |
             ./gradlew assembleDebug --stacktrace
             export ANDROID_APP_PATH=$PWD/app/build/outputs/apk/debug/app-debug.apk
-            # install only if missing (single line for /bin/sh)
-            npx appium driver list --installed | grep -q uiautomator2 || npx appium driver install uiautomator2
+
+            # ensure driver present; DO NOT fail if already installed
+            npx appium driver list --installed || true
+            npx appium driver install uiautomator2 || npx appium driver update uiautomator2 || true
+
             # start appium
             nohup npx appium --log-level warn > appium.log 2>&1 &
-            # wait for server (use seq to avoid bash brace expansion)
+            # wait appium ready (POSIX-safe)
             for i in $(seq 1 40); do curl -fsS http://127.0.0.1:4723/status >/dev/null && break; sleep 1; done
             curl -fsS http://127.0.0.1:4723/status >/dev/null || (echo 'Appium did not start'; exit 1)
+
             # run tests
             npx wdio run ./wdio.android.conf.js
 
