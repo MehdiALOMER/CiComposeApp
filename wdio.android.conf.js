@@ -1,34 +1,44 @@
-const path = require('path');
-const appPath = process.env.ANDROID_APP_PATH || path.resolve(__dirname, 'app/build/outputs/apk/debug/app-debug.apk');
 
-exports.config = {
-  runner: 'local',
-  specs: ['./e2e/**/*.spec.js'],
-  maxInstances: 1,
-  logLevel: 'info',
-  framework: 'mocha',
-  mochaOpts: { timeout: 180000 },
-  reporters: ['spec'],
+  const path = require('path');
+  const appPath = process.env.ANDROID_APP_PATH || path.resolve(__dirname, 'app/build/outputs/apk/debug/app-debug.apk');
 
-  hostname: '127.0.0.1',
-  port: 4723,
-  path: '/',
+  exports.config = {
+runner: 'local',
+specs: ['./e2e/**/*.spec.js'],
+maxInstances: 1,
+logLevel: 'info',
+framework: 'mocha',
+mochaOpts: { timeout: 180000 },
+reporters: ['spec'],
 
-  // bağlantı/yeniden deneme toleransı
-  connectionRetryTimeout: 120000,
+hostname: '127.0.0.1',
+port: 4723,
+path: '/',
 
-  capabilities: [
-    {
-      platformName: 'Android',
-      'appium:automationName': 'UiAutomator2',
-      'appium:app': appPath,
-      'appium:autoGrantPermissions': true,
-      'appium:newCommandTimeout': 180,
-      // --- stabilite ayarları ---
-      'appium:uiautomator2ServerLaunchTimeout': 120000, // uia2 server başlama süresi
-      'appium:adbExecTimeout': 200000,                   // adb ağır komutlar
-      'appium:disableWindowAnimation': true,             // yine animasyon kapansın
-      'appium:appWaitActivity': '*',                     // activity beklemesini gevşet
-    },
-  ],
+connectionRetryTimeout: 120000,
+
+  // Appium server'ı WDIO servis olarak başlatır
+services: [[
+  'appium',
+  {
+    command: 'appium',
+    args: { address: '127.0.0.1', port: 4723, basePath: '/', loglevel: 'warn' },
+    logPath: './appium-ci-logs',
+  },
+]],
+
+capabilities: [
+  {
+    platformName: 'Android',
+    'appium:automationName': 'UiAutomator2',
+    'appium:app': appPath,
+    'appium:autoGrantPermissions': true,
+    'appium:newCommandTimeout': 180,
+    // stabilite
+    'appium:uiautomator2ServerLaunchTimeout': 120000,
+    'appium:adbExecTimeout': 200000,
+    'appium:disableWindowAnimation': true,
+    'appium:appWaitActivity': '*',
+  },
+],
 };
