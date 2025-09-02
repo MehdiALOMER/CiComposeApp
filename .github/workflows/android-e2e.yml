@@ -30,7 +30,7 @@ jobs:
       - name: Install Node deps
         run: npm ci
 
-      - name: Run E2E on emulator (stable)
+      - name: Run E2E on emulator (FINAL)
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
           api-level: 33
@@ -41,9 +41,13 @@ jobs:
           script: |
             set -e
             ./gradlew assembleDebug --stacktrace
-            export ANDROID_APP_PATH=$PWD/app/build/outputs/apk/debug/app-debug.apk
 
-            # --- emulator fully booted? unlock & kill animations
+            export ANDROID_APP_PATH=$PWD/app/build/outputs/apk/debug/app-debug.apk
+            export ANDROID_HOME="$ANDROID_SDK_ROOT"   # some tools still read ANDROID_HOME
+            export APPIUM_HOME="$PWD/.appium"         # unify driver/registry between commands
+            mkdir -p "$APPIUM_HOME"
+
+            # --- emulator fully booted & unlocked
             adb wait-for-device
             for i in $(seq 1 90); do [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] && break; sleep 1; done
             adb shell settings put global window_animation_scale 0 || true
@@ -51,19 +55,22 @@ jobs:
             adb shell settings put global animator_duration_scale 0 || true
             adb shell input keyevent 82 || true
 
-            # --- appium uia2 driver: tolerate already-installed case
+            # --- sanity check (does env look good?)
+            npx appium --version || true
             npx appium driver list --installed || true
+
+            # --- ensure driver present; tolerate already-installed
             npx appium driver install uiautomator2 || npx appium driver update uiautomator2 || true
 
-            # --- start appium and wait until /status is up (use braces to exit current shell)
-            nohup npx appium -a 127.0.0.1 -p 4723 --base-path / --log-level warn > appium.log 2>&1 &
+            # --- start appium & wait until ready
+            nohup npx appium -a 127.0.0.1 -p 4723 --base-path / --log-level debug > appium.log 2>&1 &
             for i in $(seq 1 120); do curl -fsS http://127.0.0.1:4723/status >/dev/null && ok=1 && break; sleep 1; done
-            if [ -z "$ok" ]; then echo 'Appium did not start'; tail -n +1 appium.log; exit 1; fi
+            if [ -z "$ok" ]; then echo 'Appium did not start'; tail -n +200 appium.log; exit 1; fi
 
-            # --- run tests
+            # --- run the tests
             npx wdio run ./wdio.android.conf.js
 
-      - name: Upload artifacts (optional)
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
