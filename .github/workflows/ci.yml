@@ -125,28 +125,65 @@ jobs:
           APK_SIZE=$(stat -c%s "app/build/outputs/apk/debug/app-debug.apk")
           echo "APK Size: $APK_SIZE bytes"
           
-          # Wait for device to be fully ready
-          echo "⏳ Ensuring device is fully ready..."
-          adb wait-for-device
+          # Enhanced ADB and device detection
+          echo "🔧 Starting enhanced device detection..."
           
-          # Wait for system services
-          echo "🔄 Waiting for system services..."
-          timeout 300 bash -c '
-            while [[ -z $(adb shell getprop sys.boot_completed | tr -d "\r") ]]; do
-              echo "Boot in progress..."
-              sleep 3
-            done
-          '
+          # Kill any existing ADB processes
+          echo "🧹 Cleaning up ADB processes..."
+          adb kill-server || true
+          sleep 2
+          adb start-server
+          sleep 3
           
-          # Additional stability wait
-          echo "⚡ Additional stability wait..."
+          # Wait for device with multiple attempts
+          echo "⏳ Waiting for device connection..."
+          for i in {1..30}; do
+            if adb devices | grep -q "emulator.*device"; then
+              echo "✅ Device connected after $i attempts"
+              break
+            fi
+            echo "Attempt $i/30: Waiting for device..."
+            sleep 5
+          done
+          
+          # List all devices
+          echo "📱 Available devices:"
+          adb devices -l
+          
+          # Get the actual device ID
+          DEVICE_ID=$(adb devices | grep "emulator.*device" | cut -f1)
+          echo "🎯 Using device: $DEVICE_ID"
+          
+          if [ -z "$DEVICE_ID" ]; then
+            echo "❌ No device found, listing all processes..."
+            ps aux | grep emulator
+            adb devices
+            exit 1
+          fi
+          
+          # Wait for system services with specific device
+          echo "🔄 Waiting for system services on $DEVICE_ID..."
+          for i in {1..60}; do
+            BOOT_COMPLETED=$(adb -s $DEVICE_ID shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n' || echo "")
+            if [ "$BOOT_COMPLETED" = "1" ]; then
+              echo "✅ Boot completed after $i attempts"
+              break
+            fi
+            echo "Boot check $i/60: sys.boot_completed = '$BOOT_COMPLETED'"
+            sleep 5
+          done
+          
+          # Additional stability checks
+          echo "⚡ Additional stability checks..."
           sleep 10
           
-          # Check device status
-          echo "🔍 Device Status Check:"
-          adb shell getprop ro.build.version.release
-          adb shell getprop ro.product.cpu.abi
-          adb devices
+          # Verify device is ready
+          echo "🔍 Final device verification:"
+          adb -s $DEVICE_ID shell getprop ro.build.version.release
+          adb -s $DEVICE_ID shell getprop ro.product.cpu.abi
+          adb -s $DEVICE_ID shell input keyevent 82 || echo "Keyevent failed, continuing..."
+          
+          echo "✅ Device $DEVICE_ID is ready!"
           
           # Install Appium with specific versions (proven working)
           echo "📦 Installing Appium with proven versions..."
