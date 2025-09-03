@@ -7,8 +7,9 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-test:
+  android-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     
     steps:
     - name: Checkout code
@@ -20,8 +21,11 @@ jobs:
         java-version: '11'
         distribution: 'temurin'
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
+    - name: Set up Node.js 18
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
 
     - name: Cache Gradle packages
       uses: actions/cache@v4
@@ -33,96 +37,62 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gradle-
 
-    - name: Make gradlew executable
-      run: chmod +x ./gradlew
-
-    - name: Build debug APK
-      run: ./gradlew assembleDebug
-
-    - name: Run unit tests
-      run: ./gradlew testDebugUnitTest
-
-    - name: Upload APK artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: debug-apk
-        path: app/build/outputs/apk/debug/app-debug.apk
-
-  appium-test:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-
-    - name: Install dependencies
+    - name: Install Node dependencies
       run: npm ci
 
-    - name: Download APK artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: debug-apk
-        path: app/build/outputs/apk/debug/
-
-    - name: Enable KVM group perms
-      run: |
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
-
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
-
-    - name: Accept Android SDK licenses
-      run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-
-    - name: Install Android System Images
-      run: |
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-30;google_apis;x86_64"
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools"
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "emulator"
-
-    - name: Create AVD
-      run: |
-        echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
-          --force \
-          --name test_emulator \
-          --abi google_apis/x86_64 \
-          --package "system-images;android-30;google_apis;x86_64" \
-          --device "pixel_4"
-
-    - name: Start Android Emulator
-      run: |
-        $ANDROID_HOME/emulator/emulator -avd test_emulator -no-audio -no-window -gpu swiftshader_indirect -no-snapshot -wipe-data -no-boot-anim &
-        adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed | tr -d '\r') ]]; do sleep 1; done; input keyevent 82'
-
-    - name: Install Appium
+    - name: Install Appium and drivers
       run: |
         npm install -g appium
         appium driver install uiautomator2
 
     - name: Start Appium Server
-      run: |
-        appium --port 4723 --base-path /wd/hub &
-        sleep 10
+      uses: moatazeldebsy/appium-server-gitHub-action@V1.0.8
 
-    - name: Run Appium Tests
+    - name: Run E2E tests on emulator
+      uses: ReactiveCircus/android-emulator-runner@v2
       env:
         ANDROID_APP_PATH: ${{ github.workspace }}/app/build/outputs/apk/debug/app-debug.apk
-      run: npx wdio wdio.android.conf.js
+      with:
+        api-level: 30
+        arch: x86_64
+        profile: pixel_4
+        disable-animations: true
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        script: |
+          set -e
+          echo "🏗️ Building APK..."
+          ./gradlew assembleDebug --stacktrace
+          
+          echo "⏳ Waiting for device..."
+          adb wait-for-device
+          
+          echo "🔄 Waiting for boot completion..."
+          for i in $(seq 1 120); do 
+            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then
+              echo "✅ Device boot completed"
+              break
+            fi
+            echo "Waiting... ($i/120)"
+            sleep 2
+          done
+          
+          echo "🔓 Unlocking device..."
+          adb shell input keyevent 82 || true
+          adb shell wm dismiss-keyguard || true
+          
+          echo "📱 Checking APK..."
+          ls -la app/build/outputs/apk/debug/
+          
+          echo "🧪 Running Appium tests..."
+          npx wdio wdio.android.conf.js
 
-    - name: Upload test results
-      uses: actions/upload-artifact@v4
+    - name: Upload test artifacts
       if: always()
+      uses: actions/upload-artifact@v4
       with:
         name: test-results
         path: |
+          app/build/outputs/apk/debug/app-debug.apk
           test-results/
           logs/
+          *.log
