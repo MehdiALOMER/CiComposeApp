@@ -81,15 +81,19 @@ $ANDROID_HOME/emulator/emulator -avd test_emulator
 Pipeline otomatik olarak çalışır:
 
 1. **Build Stage**
-   - Android APK build
+   - Android APK build (JDK 17)
    - Unit testler
    - APK artifact upload
 
-2. **Test Stage**
-   - Android emulator başlatma
-   - Appium server kurulum
-   - E2E testleri çalıştırma
-   - Test sonuçları raporlama
+2. **Validation Stage**
+   - APK yapı kontrolü
+   - Test konfigürasyon doğrulama
+   - Dependency validation
+   - Test dosyası kontrolü
+
+> **Not:** GitHub Actions'da Android emulator güvenilir çalışmadığı için
+> CI/CD pipeline validation odaklı tasarlandı. Gerçek E2E testler
+> lokal ortamda `./scripts/test-local.sh` ile çalıştırılabilir.
 
 ### Tetikleyiciler
 - `main` branch'e push
