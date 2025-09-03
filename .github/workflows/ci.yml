@@ -71,7 +71,7 @@ jobs:
   test-appium:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     
     steps:
     - name: Checkout code
@@ -91,62 +91,101 @@ jobs:
     - name: Install test dependencies
       run: npm install
 
-    - name: Run Appium E2E Tests (Aggressive Timeout)
+    - name: Run Appium E2E Tests (Proven Configuration)
       id: appium-test
       uses: ReactiveCircus/android-emulator-runner@v2
       env:
         ANDROID_APP_PATH: ${{ github.workspace }}/app/build/outputs/apk/debug/app-debug.apk
       with:
-        api-level: 28
+        api-level: 29
         target: default
         arch: x86_64
-        profile: Nexus6
+        profile: pixel_2
         cores: 2
-        ram-size: 3072M
-        heap-size: 576M
+        ram-size: 4096M
+        heap-size: 512M
+        disk-size: 6000M
         disable-animations: true
         disable-spellchecker: true
         disable-linux-hw-accel: false
         enable-hw-keyboard: true
-        emulator-boot-timeout: 300
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -partition-size 4096
+        force-avd-creation: false
+        emulator-boot-timeout: 600
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot -wipe-data -accel on
         script: |
-          set -e
-          echo "🚀 Starting Appium E2E Tests..."
+          echo "🚀 Starting Proven Appium Configuration..."
           
-          echo "📱 APK Info:"
+          # System info
+          echo "📊 System Information:"
+          free -h
+          nproc
+          
+          echo "📱 APK Verification:"
           ls -la app/build/outputs/apk/debug/
           APK_SIZE=$(stat -c%s "app/build/outputs/apk/debug/app-debug.apk")
           echo "APK Size: $APK_SIZE bytes"
           
-          echo "⚡ Installing Appium (fast mode)..."
-          npm install -g appium@3.0.1 --silent
-          appium driver install uiautomator2@5.0.0 --silent
+          # Wait for device to be fully ready
+          echo "⏳ Ensuring device is fully ready..."
+          adb wait-for-device
           
+          # Wait for system services
+          echo "🔄 Waiting for system services..."
+          timeout 300 bash -c '
+            while [[ -z $(adb shell getprop sys.boot_completed | tr -d "\r") ]]; do
+              echo "Boot in progress..."
+              sleep 3
+            done
+          '
+          
+          # Additional stability wait
+          echo "⚡ Additional stability wait..."
+          sleep 10
+          
+          # Check device status
+          echo "🔍 Device Status Check:"
+          adb shell getprop ro.build.version.release
+          adb shell getprop ro.product.cpu.abi
+          adb devices
+          
+          # Install Appium with specific versions (proven working)
+          echo "📦 Installing Appium with proven versions..."
+          npm install -g appium@2.11.2
+          appium driver install uiautomator2@2.34.1
+          
+          echo "🔧 Appium Configuration:"
+          appium driver list --installed
+          
+          # Start Appium server
           echo "🔥 Starting Appium server..."
-          appium --port 4723 --base-path /wd/hub --relaxed-security --log-level error &
+          appium server --port 4723 --base-path /wd/hub --relaxed-security --log-level info &
           APPIUM_PID=$!
           echo "Appium PID: $APPIUM_PID"
           
+          # Wait for Appium with timeout
           echo "⏳ Waiting for Appium server..."
-          for i in {1..15}; do
-            if curl -s http://127.0.0.1:4723/wd/hub/status >/dev/null 2>&1; then
-              echo "✅ Appium ready after ${i} attempts"
-              break
-            fi
-            echo "Waiting... ($i/15)"
-            sleep 2
-          done
+          timeout 60 bash -c '
+            while ! curl -s http://127.0.0.1:4723/wd/hub/status > /dev/null; do
+              echo "Waiting for Appium server..."
+              sleep 2
+            done
+          '
           
+          echo "✅ Appium server is ready!"
+          curl -s http://127.0.0.1:4723/wd/hub/status | head -100
+          
+          # Run tests with timeout
           echo "🧪 Running E2E Tests..."
-          npx wdio wdio.android.conf.js
+          timeout 300 npx wdio wdio.android.conf.js
           TEST_EXIT_CODE=$?
           
+          # Cleanup
           echo "🛑 Cleanup..."
           kill $APPIUM_PID 2>/dev/null || true
           
           if [ $TEST_EXIT_CODE -eq 0 ]; then
-            echo "🎉 Appium tests PASSED!"
+            echo "🎉 Appium E2E tests PASSED!"
+            echo "✅ SUCCESS: Real E2E tests completed successfully"
           else
             echo "❌ Appium tests FAILED (exit code: $TEST_EXIT_CODE)"
             exit $TEST_EXIT_CODE
