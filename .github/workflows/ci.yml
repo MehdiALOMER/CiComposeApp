@@ -71,17 +71,11 @@ jobs:
   test-e2e:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
-    - name: Set up JDK 11
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
 
     - name: Set up Node.js 18
       uses: actions/setup-node@v4
@@ -97,70 +91,40 @@ jobs:
         name: debug-apk
         path: app/build/outputs/apk/debug/
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      with:
-        cmdline-tools-version: 8512546
-
-    - name: Enable KVM group perms
-      run: |
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
-
-    - name: Install Android packages
-      run: |
-        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools"
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "emulator"
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-29;default;x86_64"
-
-    - name: Create AVD
-      run: |
-        echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
-          --force \
-          --name test_emulator \
-          --abi default/x86_64 \
-          --package "system-images;android-29;default;x86_64" \
-          --device "pixel_3a"
-
-    - name: Start emulator with timeout
-      timeout-minutes: 10
-      run: |
-        echo "Starting lightweight emulator..."
-        $ANDROID_HOME/emulator/emulator -avd test_emulator \
-          -no-audio -no-window -gpu swiftshader_indirect \
-          -no-snapshot -wipe-data -no-boot-anim \
-          -memory 2048 -cores 2 \
-          -qemu -m 2048 &
-        
-        echo "Waiting for emulator to boot (max 8 minutes)..."
-        timeout 480 adb wait-for-device
-        
-        echo "Waiting for system to be ready..."
-        timeout 240 adb shell 'while [[ -z $(getprop sys.boot_completed | tr -d "\r") ]]; do echo "Booting..."; sleep 2; done'
-        
-        echo "Unlocking device..."
-        adb shell input keyevent 82
-        
-        echo "Emulator is ready!"
-
-    - name: Install and start Appium
-      run: |
-        echo "Installing Appium..."
-        npm install -g appium@3.0.1
-        appium driver install uiautomator2@5.0.0
-        echo "Starting Appium server..."
-        appium --port 4723 --base-path /wd/hub --relaxed-security &
-        sleep 10
-        echo "Appium server started"
-
-    - name: Run Appium tests
+    - name: Run E2E tests with optimized emulator
+      uses: ReactiveCircus/android-emulator-runner@v2
       env:
         ANDROID_APP_PATH: ${{ github.workspace }}/app/build/outputs/apk/debug/app-debug.apk
-      run: |
-        echo "Running tests..."
-        npx wdio wdio.android.conf.js
+      with:
+        api-level: 28
+        target: default
+        arch: x86_64
+        profile: pixel_3a
+        cores: 2
+        ram-size: 2048M
+        heap-size: 512M
+        disable-animations: true
+        disable-spellchecker: true
+        disable-linux-hw-accel: false
+        enable-hw-keyboard: true
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+        script: |
+          echo "📱 Verifying APK..."
+          ls -la app/build/outputs/apk/debug/
+          
+          echo "🚀 Installing Appium..."
+          npm install -g appium@3.0.1
+          appium driver install uiautomator2@5.0.0
+          
+          echo "🔥 Starting Appium server..."
+          appium --port 4723 --base-path /wd/hub --relaxed-security &
+          sleep 8
+          
+          echo "🔍 Checking Appium status..."
+          curl -s http://127.0.0.1:4723/wd/hub/status || echo "Appium status check failed, continuing..."
+          
+          echo "🧪 Running E2E tests..."
+          npx wdio wdio.android.conf.js
 
     - name: Upload test results
       if: always()
