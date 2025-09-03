@@ -70,8 +70,8 @@ jobs:
 
   test-appium:
     needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: macos-latest  # macOS daha iyi emulator support
+    timeout-minutes: 20
     
     steps:
     - name: Checkout code
@@ -111,7 +111,7 @@ jobs:
         enable-hw-keyboard: true
         force-avd-creation: false
         emulator-boot-timeout: 600
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot -wipe-data -accel on
+        emulator-options: -no-window -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot -wipe-data
         script: |
           echo "🚀 Starting Proven Appium Configuration..."
           
