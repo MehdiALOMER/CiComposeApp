@@ -25,7 +25,6 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
 
     - name: Cache Gradle packages
       uses: actions/cache@v4
@@ -37,8 +36,19 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gradle-
 
+    - name: Cache Node modules
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
     - name: Install Node dependencies
-      run: npm ci
+      run: |
+        echo "📦 Installing Node.js dependencies..."
+        npm install
+        echo "✅ Dependencies installed successfully"
 
     - name: Run E2E tests on emulator
       uses: ReactiveCircus/android-emulator-runner@v2
@@ -52,52 +62,62 @@ jobs:
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         script: |
           set -e
+          
           echo "🏗️ Building APK..."
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --stacktrace --no-daemon
           
           echo "⏳ Waiting for device..."
           adb wait-for-device
           
           echo "🔄 Waiting for boot completion..."
-          for i in $(seq 1 120); do 
-            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then
-              echo "✅ Device boot completed"
-              break
-            fi
-            echo "Waiting... ($i/120)"
-            sleep 2
-          done
+          timeout 300 bash -c 'while [[ -z $(adb shell getprop sys.boot_completed | tr -d "\r") ]]; do sleep 2; done' || {
+            echo "❌ Device boot timeout"
+            exit 1
+          }
+          echo "✅ Device boot completed"
           
           echo "🔓 Unlocking device..."
           adb shell input keyevent 82 || true
           adb shell wm dismiss-keyguard || true
+          sleep 2
           
           echo "📱 Checking APK..."
           ls -la app/build/outputs/apk/debug/
           
-          echo "🚀 Installing and starting Appium..."
-          npm install -g appium
-          appium driver install uiautomator2
+          echo "🚀 Installing Appium globally..."
+          npm install -g appium@3.0.1
+          
+          echo "🔧 Installing UiAutomator2 driver..."
+          appium driver install uiautomator2@5.0.0
+          
+          echo "📋 Listing installed drivers..."
+          appium driver list --installed
           
           echo "🔥 Starting Appium server..."
-          appium --port 4723 --base-path /wd/hub --log-level info &
+          appium --port 4723 --base-path /wd/hub --log-level info --relaxed-security &
           APPIUM_PID=$!
           
           echo "⏱️ Waiting for Appium server to start..."
-          for i in $(seq 1 30); do
-            if curl -s http://127.0.0.1:4723/wd/hub/status > /dev/null; then
-              echo "✅ Appium server is ready"
-              break
-            fi
-            echo "Waiting for Appium server... ($i/30)"
-            sleep 2
-          done
+          timeout 60 bash -c 'while ! curl -s http://127.0.0.1:4723/wd/hub/status > /dev/null; do sleep 2; done' || {
+            echo "❌ Appium server start timeout"
+            kill $APPIUM_PID || true
+            exit 1
+          }
+          echo "✅ Appium server is ready"
+          
+          echo "🔍 Checking Appium status..."
+          curl -s http://127.0.0.1:4723/wd/hub/status | head -200
           
           echo "🧪 Running Appium tests..."
-          npx wdio wdio.android.conf.js
+          timeout 600 npx wdio wdio.android.conf.js || {
+            echo "❌ Test execution timeout or failure"
+            kill $APPIUM_PID || true
+            exit 1
+          }
           
           echo "🛑 Stopping Appium server..."
           kill $APPIUM_PID || true
+          echo "✅ Test execution completed successfully"
 
     - name: Upload test artifacts
       if: always()
