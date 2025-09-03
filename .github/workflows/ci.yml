@@ -61,8 +61,6 @@ jobs:
         disable-animations: true
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         script: |
-          set -e
-          
           echo "🏗️ Building APK..."
           ./gradlew assembleDebug --stacktrace --no-daemon
           
@@ -70,16 +68,22 @@ jobs:
           adb wait-for-device
           
           echo "🔄 Waiting for boot completion..."
-          timeout 300 bash -c 'while [[ -z $(adb shell getprop sys.boot_completed | tr -d "\r") ]]; do sleep 2; done' || {
-            echo "❌ Device boot timeout"
-            exit 1
-          }
-          echo "✅ Device boot completed"
+          counter=0
+          while [ $counter -lt 150 ]; do
+            boot_completed=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n' || echo "")
+            if [ "$boot_completed" = "1" ]; then
+              echo "✅ Device boot completed after $counter attempts"
+              break
+            fi
+            echo "Waiting for boot... ($counter/150)"
+            sleep 2
+            counter=$((counter + 1))
+          done
           
           echo "🔓 Unlocking device..."
-          adb shell input keyevent 82 || true
-          adb shell wm dismiss-keyguard || true
-          sleep 2
+          adb shell input keyevent 82 || echo "Keyevent failed, continuing..."
+          adb shell wm dismiss-keyguard || echo "Dismiss keyguard failed, continuing..."
+          sleep 3
           
           echo "📱 Checking APK..."
           ls -la app/build/outputs/apk/debug/
@@ -91,33 +95,43 @@ jobs:
           appium driver install uiautomator2@5.0.0
           
           echo "📋 Listing installed drivers..."
-          appium driver list --installed
+          appium driver list --installed || echo "Driver list failed, continuing..."
           
           echo "🔥 Starting Appium server..."
           appium --port 4723 --base-path /wd/hub --log-level info --relaxed-security &
           APPIUM_PID=$!
+          echo "Appium PID: $APPIUM_PID"
           
           echo "⏱️ Waiting for Appium server to start..."
-          timeout 60 bash -c 'while ! curl -s http://127.0.0.1:4723/wd/hub/status > /dev/null; do sleep 2; done' || {
-            echo "❌ Appium server start timeout"
-            kill $APPIUM_PID || true
-            exit 1
-          }
-          echo "✅ Appium server is ready"
+          counter=0
+          while [ $counter -lt 30 ]; do
+            if curl -s http://127.0.0.1:4723/wd/hub/status >/dev/null 2>&1; then
+              echo "✅ Appium server is ready after $counter attempts"
+              break
+            fi
+            echo "Waiting for Appium server... ($counter/30)"
+            sleep 2
+            counter=$((counter + 1))
+          done
           
           echo "🔍 Checking Appium status..."
-          curl -s http://127.0.0.1:4723/wd/hub/status | head -200
+          curl -s http://127.0.0.1:4723/wd/hub/status || echo "Status check failed, but continuing..."
           
           echo "🧪 Running Appium tests..."
-          timeout 600 npx wdio wdio.android.conf.js || {
-            echo "❌ Test execution timeout or failure"
-            kill $APPIUM_PID || true
-            exit 1
-          }
+          npx wdio wdio.android.conf.js
+          TEST_EXIT_CODE=$?
           
           echo "🛑 Stopping Appium server..."
-          kill $APPIUM_PID || true
-          echo "✅ Test execution completed successfully"
+          if [ ! -z "$APPIUM_PID" ]; then
+            kill $APPIUM_PID || echo "Failed to kill Appium process"
+          fi
+          
+          if [ $TEST_EXIT_CODE -eq 0 ]; then
+            echo "✅ Test execution completed successfully"
+          else
+            echo "❌ Test execution failed with exit code $TEST_EXIT_CODE"
+            exit $TEST_EXIT_CODE
+          fi
 
     - name: Upload test artifacts
       if: always()
