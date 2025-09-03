@@ -40,14 +40,6 @@ jobs:
     - name: Install Node dependencies
       run: npm ci
 
-    - name: Install Appium and drivers
-      run: |
-        npm install -g appium
-        appium driver install uiautomator2
-
-    - name: Start Appium Server
-      uses: moatazeldebsy/appium-server-gitHub-action@V1.0.8
-
     - name: Run E2E tests on emulator
       uses: ReactiveCircus/android-emulator-runner@v2
       env:
@@ -83,8 +75,29 @@ jobs:
           echo "📱 Checking APK..."
           ls -la app/build/outputs/apk/debug/
           
+          echo "🚀 Installing and starting Appium..."
+          npm install -g appium
+          appium driver install uiautomator2
+          
+          echo "🔥 Starting Appium server..."
+          appium --port 4723 --base-path /wd/hub --log-level info &
+          APPIUM_PID=$!
+          
+          echo "⏱️ Waiting for Appium server to start..."
+          for i in $(seq 1 30); do
+            if curl -s http://127.0.0.1:4723/wd/hub/status > /dev/null; then
+              echo "✅ Appium server is ready"
+              break
+            fi
+            echo "Waiting for Appium server... ($i/30)"
+            sleep 2
+          done
+          
           echo "🧪 Running Appium tests..."
           npx wdio wdio.android.conf.js
+          
+          echo "🛑 Stopping Appium server..."
+          kill $APPIUM_PID || true
 
     - name: Upload test artifacts
       if: always()

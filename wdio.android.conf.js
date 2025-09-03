@@ -68,8 +68,8 @@ exports.config = {
     },
   ],
 
-  // Services
-  services: [
+  // Services - CI ortamında Appium'u kendimiz başlatıyoruz
+  services: process.env.CI ? [] : [
     ['appium', {
       args: {
         address: process.env.APPIUM_HOST || '127.0.0.1',
