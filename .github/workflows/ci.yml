@@ -116,12 +116,31 @@ jobs:
           echo "❌ WebdriverIO config not found"
           exit 1
         fi
+        echo "✅ WebdriverIO config found"
         
-        # Package.json test script kontrolü
-        if ! npm run --silent test --dry-run 2>/dev/null; then
-          echo "❌ Test script configuration invalid"
+        # Package.json test script varlığını kontrol et
+        if ! grep -q '"test":' package.json; then
+          echo "❌ Test script not found in package.json"
           exit 1
         fi
+        echo "✅ Test script found in package.json"
+        
+        # WebdriverIO config syntax kontrolü
+        if ! node -c wdio.android.conf.js; then
+          echo "❌ WebdriverIO config has syntax errors"
+          exit 1
+        fi
+        echo "✅ WebdriverIO config syntax valid"
+        
+        # Test dependencies kontrolü
+        REQUIRED_DEPS=("webdriverio" "appium" "@wdio/cli" "@wdio/mocha-framework")
+        for dep in "${REQUIRED_DEPS[@]}"; do
+          if ! grep -q "\"$dep\":" package.json; then
+            echo "❌ Required dependency $dep not found"
+            exit 1
+          fi
+        done
+        echo "✅ All required dependencies found"
         
         echo "✅ Test configuration validation passed"
 
